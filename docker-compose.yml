@@ -1,0 +1,237 @@
+version: '3'
+services:
+  postgres:
+    image: gossamer-docker.battleforge.bah.com/postgres:0.3.0-DEV-amd64
+    pull_policy: never
+    container_name: Demo_Node_1-postgres
+    environment:
+      - POSTGRES_DB=datamesh
+      - POSTGRES_USER=datamesh
+      - POSTGRES_PASSWORD=datamesh
+    ports:
+      - 5432:5432
+    hostname: postgres
+    networks:
+      - net
+    restart: always
+  zookeeper:
+    image: gossamer-docker.battleforge.bah.com/zookeeper:3.6.1
+    pull_policy: never
+    container_name: Demo_Node_1-zookeeper
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - net
+    restart: always
+  kafka:
+    image: gossamer-docker.battleforge.bah.com/datamesh-kafka:0.3.0-DEV-amd64
+    pull_policy: never
+    container_name: Demo_Node_1-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL_PLAINTEXT:PLAINTEXT,EXTERNAL_PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL_PLAINTEXT://0.0.0.0:9092,EXTERNAL_PLAINTEXT://0.0.0.0:30322
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL_PLAINTEXT://localhost:9092,EXTERNAL_PLAINTEXT://kafka:30322
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL_PLAINTEXT
+      KAFKA_CREATE_TOPICS: "DPV.Availability.Heartbeat:1:1"
+    networks:
+      - net
+    restart: always
+  kafkaui:
+    image: gossamer-docker.battleforge.bah.com/kafdrop:latest
+    pull_policy: never
+    container_name: Demo_Node_1-kafkaui
+    depends_on:
+      - kafka
+    ports:
+      - 8900:8900
+    links:
+      - kafka
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kafkaui.rule=PathPrefix(`/kafka`)"
+      - "traefik.http.routers.kafkaui.tls=true"
+      - "traefik.http.routers.kafkaui.entrypoints=Demo_Node_1-websecure"
+    networks:
+      - net
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:30322"
+      JVM_OPTS: "-Xms32M -Xmx64M"
+      SERVER_PORT: "8900"
+      SERVER_SERVLET_CONTEXTPATH: "/kafka"
+    restart: always
+  opensearch-node1: # This is also the hostname of the container within the Docker network (i.e. https://opensearch-node1/)
+    image: artifactory.battleforge.bah.com/gossamer-docker/opensearch:2.3.0 # Specifying the latest available image - modify if you want a specific version
+    container_name: Demo_Node_1-opensearch
+    environment:
+      - cluster.name=opensearch-cluster # Name the cluster
+      - node.name=opensearch-node1 # Name the node that will run in this container
+      - discovery.seed_hosts=opensearch-node1 # Nodes to look for when discovering the cluster
+      - cluster.initial_cluster_manager_nodes=opensearch-node1 # Nodes eligible to serve as cluster manager
+      - bootstrap.memory_lock=true # Disable JVM heap memory swapping
+      - plugins.security.disabled=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # Set min and max JVM heap sizes to at least 50% of system RAM
+    ulimits:
+      memlock:
+        soft: -1 # Set memlock to unlimited (no soft or hard limit)
+        hard: -1
+      nofile:
+        soft: 65536 # Maximum number of open files for the opensearch user - set to at least 65536
+        hard: 65536
+    volumes:
+      - opensearch-data1:/usr/share/opensearch/data # Creates volume called opensearch-data1 and mounts it to the container
+    ports:
+      - 9200:9200 # REST API
+      - 9600:9600 # Performance Analyzer
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.opensearch.rule=PathPrefix(`/elasticsearch`)"
+      - "traefik.http.routers.opensearch.tls=true"
+      - "traefik.http.routers.opensearch.entrypoints=Demo_Node_1-websecure"
+      - "traefik.http.routers.opensearch.middlewares=opensearch"
+      - "traefik.http.middlewares.opensearch.replacepathregex.regex=^/elasticsearch/(.*)"
+      - "traefik.http.middlewares.opensearch.replacepathregex.replacement=/$$1"
+    restart: always
+    networks:
+      - net # All of the containers will join the same Docker bridge network
+  minio: # This is also the hostname of the container within the Docker network (i.e. https://opensearch-node1/)
+    image: artifactory.battleforge.bah.com/gossamer-docker/minio:latest # Specifying the latest available image - modify if you want a specific version
+    ports:
+      - "11000:11000"
+      - "11001:11001"
+    volumes:
+      - minio_storage:/data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+    command: server --address ":11000" --console-address ":11001" /data
+    restart: always
+    networks:
+      - net # All of the containers will join the same Docker bridge network
+  dpm:
+    image: gossamer-docker.battleforge.bah.com/space-dpm-v1-api
+    pull_policy: never
+    container_name: dpm
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+    ports:
+      - "8080"
+    links:
+      - postgres
+      - kafka
+      - minio
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dpmv1.rule=PathPrefix(`/space/dpm/v1/api`)"
+      - "traefik.http.routers.dpmv1.tls=true"
+      - "traefik.http.routers.dpmv1.entrypoints=Demo_Node_1-websecure"
+    networks:
+      - net
+    environment:
+      SERVER_PORT: "8080"
+      SERVER_SERVLET_CONTEXTPATH: "/space/dpm/v1/api"
+      SERVER_CONNECTION_TIMEOUT: "15000"
+      CONNECTION_REQUEST_TIMEOUT: "15000"
+      CONNECT_TIMEOUT: "15000"
+      READ_TIMEOUT: "15000"
+      SPRING_DATA_REST_DEFAULTMEDIATYPE: "application/json"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "none"
+      SPRING_JPA_HIBERNATE_SHOW_SQL: "true"
+      SPRING_JPA_DATABASE: "POSTGRESQL"
+      SPRING_MVC_PATHMATCH_MATCHING_STRATEGY: "ANT_PATH_MATCHER"
+      SPRING_DATASOURCE_CONTINUE_ON_ERROR: "true"
+      SPRING_DATASOURCE_DRIVERCLASSNAME: "org.postgresql.Driver"
+      SPRING_DATASOURCE_INITIALIZATION_MODE: "always"
+      SPRING_DATASOURCE_INITIALIZE: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_USE_SQL_COMMENTS: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_DIALECT: "org.hibernate.dialect.PostgreSQLDialect"
+      SPRING_DATASOURCE_PLATFORM: postgres
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/dataproduct"
+      SPRING_DATASOURCE_USERNAME: "datamesh"
+      LOGGING_LEVEL_ORG_HIBERNATE_SQL: "WARN"
+      LOGGING_LEVEL_ORG_HIBERNATE_TYPE: "WARN"
+      LOGGING_LEVEL_ORG_HIBERNATE_TYPE_DESCRIPTOR_SQL_BASICBINDER: "WARN"
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB_CLIENT_RESTTEMPLATE: "WARN"
+      LOG4J: "config/log4j-debug.xml"
+      NODE_ID: "00000000-0000-0000-0000-000000000002"
+      KAFKA_BOOTSTRAP: "kafka:30322"
+      KAFKA_PARTITIONS: "1"
+      KAFKA_REPLICATION_FACTOR: "1"
+      CDC_SOURCE_RECORD_FORMAT: json
+      DATA_MESH_SYNC_HOSTNAME: "http://sync:8070"
+      DATA_MESH_SYNC_ENDPOINT: "/datamesh/sync/data-products/versions/heartbeat"
+    restart: always
+  egress:
+    image: artifactory.battleforge.bah.com/gossamer-docker/datamesh-elastic-search-egress:0.4.0-DEV
+    pull_policy: never
+    container_name: egress
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+      - dpm
+    ports:
+      - "8080"
+    links:
+      - postgres
+      - kafka
+      - minio
+      - dpm
+    networks:
+      - net
+    environment:
+      DATA_MESH_DATA_PRODUCT_ID: 8e6274ba-dc4b-44cd-99fd-6629594b0ebd
+      DATA_MESH_DATA_PRODUCT_NAME: DPM
+      DATA_MESH_DATA_PRODUCT_VERSION: 1
+      DATA_MESH_DATA_PRODUCT_DOMAIN_NAME: Space
+      DATA_PRODUCT_NODE_REST_URL_ROOT: http://dpm:8080
+      JSON_SCHEMAS_ENDPOINT: /metadata/schemas
+      ES_SCHEMAS_ENDPOINT: /metadata/es_schema
+      ELASTICSEARCH_NODE_HOSTNAME: opensearch-node1
+      ELASTICSEARCH_NODE_PORT: "9200"
+      ELASTICSEARCH_NODE_PROTOCOL: http
+      ELASTICSEARCH_USERNAME: admin
+      ELASTICSEARCH_PASSWORD: admin
+      KAFKA_BOOTSTRAP: "kafka:30322"
+      LOG4J: config/log4j2.xml
+    restart: always
+  traefik:
+    image: "traefik:2.5.6"
+    pull_policy: never
+    container_name: Demo_Node_1-traefik
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--serverstransport.insecureskipverify=true"
+      - "--entrypoints.Demo_Node_1-websecure.address=:33335"
+      - "--entryPoints.Demo_Node_1-websecure.forwardedHeaders.insecure=true"
+    ports:
+      - "33335:33335"
+    networks:
+      - net
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    restart: always
+volumes:
+  opensearch-data1: {}
+  minio_storage: {}
+networks:
+  net:
+    name: net
