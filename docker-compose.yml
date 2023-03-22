@@ -71,7 +71,7 @@ services:
       SERVER_SERVLET_CONTEXTPATH: "/kafka"
     restart: always
   opensearch-node1: # This is also the hostname of the container within the Docker network (i.e. https://opensearch-node1/)
-    image: artifactory.battleforge.bah.com/gossamer-docker/opensearch:2.3.0 # Specifying the latest available image - modify if you want a specific version
+    image: opensearchproject/opensearch:latest # Specifying the latest available image - modify if you want a specific version
     container_name: Demo_Node_1-opensearch
     environment:
       - cluster.name=opensearch-cluster # Name the cluster
@@ -101,6 +101,36 @@ services:
       - "traefik.http.routers.opensearch.middlewares=opensearch"
       - "traefik.http.middlewares.opensearch.replacepathregex.regex=^/elasticsearch/(.*)"
       - "traefik.http.middlewares.opensearch.replacepathregex.replacement=/$$1"
+    restart: always
+    networks:
+      - net # All of the containers will join the same Docker bridge network
+  opensearch-dashboards: # This is also the hostname of the container within the Docker network (i.e. https://opensearch-node1/)
+    image: opensearchproject/opensearch-dashboards:latest # Specifying the latest available image - modify if you want a specific version
+    container_name: opensearch-dashboards
+    environment:
+      - plugins.security.disabled=true
+    ports:
+      - 5601:5601 # REST API
+    expose:
+      - "5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch-node1:9200"]'
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      SERVER_HOST: "0.0.0.0"
+      SERVER_BASEPATH: "/kibana"
+      PLUGINS_SECURITY_ENABLED: "false"
+      PLUGINS_SECURITY_DISABLED: "true"
+      XPACK_SECURITY_DISABLED": "true"
+      XPACK_SECURITY_ENABLED": "false"
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kibana.rule=PathPrefix(`/kibana`)"
+      - "traefik.http.routers.kibana.tls=true"
+      - "traefik.http.routers.kibana.entrypoints=Demo_Node_1-websecure"
+      - "traefik.http.routers.kibana.middlewares=kibana"
+      - "traefik.http.middlewares.kibana.replacepathregex.regex=^/kibana/(.*)"
+      - "traefik.http.middlewares.kibana.replacepathregex.replacement=/$$1"
     restart: always
     networks:
       - net # All of the containers will join the same Docker bridge network
