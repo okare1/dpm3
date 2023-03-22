@@ -240,6 +240,96 @@ services:
       KAFKA_BOOTSTRAP: "kafka:30322"
       LOG4J: config/log4j2.xml
     restart: always
+  dpa2:
+    image: artifactory.battleforge.bah.com/gossamer-docker/dbmesh-dpa2-v1-api:0.0.0-DEV
+    pull_policy: never
+    container_name: dpa2
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+    ports:
+      - "8081"
+    links:
+      - postgres
+      - kafka
+      - minio
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dpa2v1.rule=PathPrefix(`/dbmesh/dpa2/v1/api`)"
+      - "traefik.http.routers.dpa2v1.tls=true"
+      - "traefik.http.routers.dpa2v1.entrypoints=Demo_Node_1-websecure"
+    networks:
+      - net
+    environment:
+      SERVER_PORT: "8081"
+      SERVER_SERVLET_CONTEXTPATH: "/dbmesh/dpa2/v1/api"
+      SERVER_CONNECTION_TIMEOUT: "15000"
+      CONNECTION_REQUEST_TIMEOUT: "15000"
+      CONNECT_TIMEOUT: "15000"
+      READ_TIMEOUT: "15000"
+      SPRING_DATA_REST_DEFAULTMEDIATYPE: "application/json"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "none"
+      SPRING_JPA_HIBERNATE_SHOW_SQL: "true"
+      SPRING_JPA_DATABASE: "POSTGRESQL"
+      SPRING_MVC_PATHMATCH_MATCHING_STRATEGY: "ANT_PATH_MATCHER"
+      SPRING_DATASOURCE_CONTINUE_ON_ERROR: "true"
+      SPRING_DATASOURCE_DRIVERCLASSNAME: "org.postgresql.Driver"
+      SPRING_DATASOURCE_INITIALIZATION_MODE: "always"
+      SPRING_DATASOURCE_INITIALIZE: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_USE_SQL_COMMENTS: "true"
+      SPRING_DATASOURCE_JPA_PROPERTIES_HIBERNATE_DIALECT: "org.hibernate.dialect.PostgreSQLDialect"
+      SPRING_DATASOURCE_PLATFORM: postgres
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/dataproduct"
+      SPRING_DATASOURCE_USERNAME: "datamesh"
+      LOGGING_LEVEL_ORG_HIBERNATE_SQL: "WARN"
+      LOGGING_LEVEL_ORG_HIBERNATE_TYPE: "WARN"
+      LOGGING_LEVEL_ORG_HIBERNATE_TYPE_DESCRIPTOR_SQL_BASICBINDER: "WARN"
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB_CLIENT_RESTTEMPLATE: "WARN"
+      LOG4J: "config/log4j-debug.xml"
+      NODE_ID: "00000000-0000-0000-0000-000000000002"
+      KAFKA_BOOTSTRAP: "kafka:30322"
+      KAFKA_PARTITIONS: "1"
+      KAFKA_REPLICATION_FACTOR: "1"
+      CDC_SOURCE_RECORD_FORMAT: json
+      DATA_MESH_SYNC_HOSTNAME: "http://sync:8070"
+      DATA_MESH_SYNC_ENDPOINT: "/datamesh/sync/data-products/versions/heartbeat"
+    restart: always
+  dpa2egress:
+    image: artifactory.battleforge.bah.com/gossamer-docker/datamesh-elastic-search-egress:0.4.0-DEV
+    pull_policy: never
+    container_name: dpa2egress
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+      - dpa2
+    ports:
+      - "8080"
+    links:
+      - postgres
+      - kafka
+      - minio
+      - dpa2
+    networks:
+      - net
+    environment:
+      DATA_MESH_DATA_PRODUCT_ID: 8e6274ba-dc4b-44cd-99fd-6629594b0ebd
+      DATA_MESH_DATA_PRODUCT_NAME: DPA2
+      DATA_MESH_DATA_PRODUCT_VERSION: 1
+      DATA_MESH_DATA_PRODUCT_DOMAIN_NAME: DBMesh
+      DATA_PRODUCT_NODE_REST_URL_ROOT: http://dpa2:8081
+      JSON_SCHEMAS_ENDPOINT: /metadata/schemas
+      ES_SCHEMAS_ENDPOINT: /metadata/es_schema
+      ELASTICSEARCH_NODE_HOSTNAME: opensearch-node1
+      ELASTICSEARCH_NODE_PORT: "9200"
+      ELASTICSEARCH_NODE_PROTOCOL: http
+      ELASTICSEARCH_USERNAME: admin
+      ELASTICSEARCH_PASSWORD: admin
+      KAFKA_BOOTSTRAP: "kafka:30322"
+      LOG4J: config/log4j2.xml
+    restart: always
   traefik:
     image: "traefik:2.5.6"
     pull_policy: never
